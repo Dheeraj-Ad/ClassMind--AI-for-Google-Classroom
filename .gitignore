@@ -1,0 +1,12 @@
+.env
+.venv/
+__pycache__/
+.pytest_cache/
+.test-runs/
+.test-temp*/
+*.py[cod]
+data/**
+!data/**/
+!data/**/.gitkeep
+backend/auth/credentials.json
+*.log
