@@ -2,7 +2,8 @@
 from functools import lru_cache
 from pathlib import Path
 
-from pydantic import Field
+from pydantic import Field, SecretStr
+from typing import Literal
 from pydantic_settings import BaseSettings, SettingsConfigDict
 
 ROOT = Path(__file__).resolve().parents[1]
@@ -30,6 +31,11 @@ class Settings(BaseSettings):
     max_download_mb: int = Field(200, ge=1, le=1024)
     max_extracted_chars: int = Field(2_000_000, ge=10000, le=10_000_000)
     youtube_languages: str = "en,hi"
+    answer_provider: Literal["local_evidence", "gemini"] = "local_evidence"
+    gemini_api_key: SecretStr = Field(default="", exclude=True)
+    gemini_model: str = Field("gemini-3.5-flash-lite", pattern=r"^[a-z0-9][a-z0-9.-]{1,100}$")
+    gemini_timeout_seconds: int = Field(20, ge=5, le=60)
+    gemini_max_output_tokens: int = Field(1400, ge=256, le=4096)
 
     def path(self, path: Path) -> Path:
         return path if path.is_absolute() else ROOT / path

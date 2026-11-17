@@ -61,8 +61,8 @@ def main():
             try:
                 response = requests.get(url, timeout=1)
                 if response.ok:
-                    if label == "backend" and response.json().get("answer_mode") != "local_evidence":
-                        raise SystemExit("Another backend is serving this port; expected local evidence mode.")
+                    if label == "backend" and response.json().get("answer_mode") != config.answer_provider:
+                        raise SystemExit("Another backend is serving this port; configured answer mode does not match.")
                     print(f"{label}: ready", flush=True)
                     break
             except requests.RequestException:
@@ -70,7 +70,7 @@ def main():
             time.sleep(0.5)
         else:
             raise SystemExit(f"{label} startup timed out; check data/logs/{label}.log.")
-    print("ClassMind is running at http://localhost:8501 in local evidence mode.")
+    print(f"ClassMind is running at http://localhost:8501 with {config.answer_provider} answers.")
 
 
 if __name__ == "__main__":

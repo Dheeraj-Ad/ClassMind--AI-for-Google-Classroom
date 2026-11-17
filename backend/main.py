@@ -6,7 +6,7 @@ from concurrent.futures import ThreadPoolExecutor
 from contextlib import asynccontextmanager
 from typing import Literal
 
-from fastapi import Depends, FastAPI, Header, Request
+from fastapi import Depends, FastAPI, Header, Request, Query
 from fastapi.responses import JSONResponse, RedirectResponse
 from pydantic import BaseModel, Field
 
@@ -33,7 +33,7 @@ async def lifespan(app):
     executor.shutdown(wait=True, cancel_futures=True)
 
 
-app = FastAPI(title="ClassMind", version="1.2.0", lifespan=lifespan)
+app = FastAPI(title="ClassMind", version="1.4.0", lifespan=lifespan)
 
 
 @app.exception_handler(ServiceError)
@@ -84,7 +84,9 @@ def enqueue_import(user_id, course_id):
 
 @app.get("/health")
 def health():
-    return {"status": "ok", "version": "1.2.0", "answer_mode": "local_evidence", "max_download_mb": settings().max_download_mb,
+    return {"status": "ok", "version": "1.4.0", "answer_mode": settings().answer_provider,
+            "model": settings().gemini_model if settings().answer_provider == "gemini" else settings().embedding_model,
+            "gemini_key_configured": bool(settings().gemini_api_key.get_secret_value()), "max_download_mb": settings().max_download_mb,
             "source_types": ["drive", "youtube", "web", "post"]}
 
 
@@ -257,9 +259,9 @@ class ChatRequest(BaseModel):
 
 
 @app.get("/courses/{course_id}/history")
-def chat_history(course_id: str, user_id=Depends(current_user)):
+def chat_history(course_id: str, user_id=Depends(current_user), limit: int | None = Query(default=None, ge=2, le=200)):
     require_course(user_id, course_id)
-    return history(user_id, course_id)
+    return recent_history(user_id, course_id, limit) if limit is not None else history(user_id, course_id)
 
 
 @app.post("/courses/{course_id}/chat")

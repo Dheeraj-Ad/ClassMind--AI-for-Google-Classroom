@@ -55,6 +55,7 @@ def initialize():
         CREATE INDEX IF NOT EXISTS jobs_user_course ON jobs(user_id,course_id);
         CREATE TABLE IF NOT EXISTS messages (id INTEGER PRIMARY KEY AUTOINCREMENT,
             user_id TEXT, course_id TEXT, payload TEXT);
+        CREATE INDEX IF NOT EXISTS messages_user_course ON messages(user_id,course_id,id);
         """)
         # One backend worker is required; interrupted imports retain the last published index.
         con.execute("UPDATE jobs SET status='failed', payload=? WHERE status IN ('queued','running')",

@@ -1,4 +1,4 @@
-"""Fast local evidence assistant. No remote LLM, API key, or generated factual claims."""
+"""Course retrieval with optional Gemini explanations and a local evidence fallback."""
 from collections import Counter
 import re
 import time
@@ -6,6 +6,7 @@ import time
 from backend.rag.retriever import retrieve
 from backend.rag.vectorstore import encode, encode_query
 from backend.utils.prompts import ABSTENTION
+from backend.config import settings
 
 STOP_WORDS = set("""a an the this that these those it its they them their is are was were be been being
 of to in on for with by from at as and or but if than then into about through during after before
@@ -167,6 +168,34 @@ def answer_question(user_id, course_id, question, history=None, mode="chat"):
         return result
     query = resolve_query(question, history if mode == "chat" else None)
     documents = retrieve(user_id, course_id, query)
+    provider_notice = None
+    if settings().answer_provider == "gemini" and documents:
+        from backend.rag.gemini import GeminiUnavailable, generate_answer
+        try:
+            generated = generate_answer(question, query, documents, mode)
+            result = abstain()
+            result.update(answer_mode="gemini", model=settings().gemini_model)
+            if generated.supported:
+                sources, sections, points = {}, [], []
+                for index, segment in enumerate([generated.answer, *generated.details]):
+                    ids = list(dict.fromkeys(c.source_id for c in segment.citations))
+                    sections.append(segment.text + " " + " ".join(f"[{sid}]" for sid in ids))
+                    for citation in segment.citations:
+                        doc = documents[int(citation.source_id[1:]) - 1]
+                        source = sources.setdefault(citation.source_id, source_record(citation.source_id, citation.quote, doc))
+                        if citation.quote not in source["quotes"]:
+                            source["quotes"].append(citation.quote)
+                    if index:
+                        points.append({"text": segment.text, "source_ids": ids})
+                result.update(content="\n\n".join(sections), answer=generated.answer.text,
+                              answer_source_ids=list(dict.fromkeys(c.source_id for c in generated.answer.citations)),
+                              key_points=points, sources=list(sources.values()), grounded=True)
+            else:
+                result["guidance"] = "The retrieved sources do not explain this question. Add a relevant lesson or ask about a topic covered in your notes."
+            result["elapsed_ms"] = round((time.perf_counter() - started) * 1000)
+            return result
+        except GeminiUnavailable as exc:
+            provider_notice = str(exc)
     evidence = select_evidence(documents, query)
     if not evidence:
         result = abstain()
@@ -192,6 +221,8 @@ def answer_question(user_id, course_id, question, history=None, mode="chat"):
             result["answer"] = readable(evidence[0][0])
             result["key_points"] = [{"text": readable(passage), "source_id": f"S{i}"} for i, (passage, _) in enumerate(evidence[1:], 2)]
     result["elapsed_ms"] = round((time.perf_counter() - started) * 1000)
+    if provider_notice:
+        result["provider_notice"] = provider_notice
     return result
 
 

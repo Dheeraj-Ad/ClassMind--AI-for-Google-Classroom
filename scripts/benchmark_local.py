@@ -1,11 +1,13 @@
 """Read-only timing check against an existing course; prints no course text or IDs."""
 import json
+import os
 from pathlib import Path
 import statistics
 import sys
 import time
 
 sys.path.insert(0, str(Path(__file__).resolve().parents[1]))
+os.environ["ANSWER_PROVIDER"] = "local_evidence"
 
 import psutil
 from backend.main import course_summaries

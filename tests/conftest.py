@@ -7,6 +7,15 @@ from backend.config import settings
 from backend.storage import db, initialize
 
 
+@pytest.fixture(autouse=True)
+def offline_ai_by_default(monkeypatch):
+    monkeypatch.setenv("ANSWER_PROVIDER", "local_evidence")
+    monkeypatch.setenv("GEMINI_API_KEY", "")
+    settings.cache_clear()
+    yield
+    settings.cache_clear()
+
+
 @pytest.fixture
 def configured(tmp_path, monkeypatch):
     monkeypatch.setenv("DATA_DIR", str(tmp_path / "data"))

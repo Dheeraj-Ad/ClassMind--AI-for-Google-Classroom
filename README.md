@@ -1,10 +1,28 @@
 # ClassMind — Local Study Assistant
 
-ClassMind connects to Google Classroom, organizes downloadable study materials, and finds cited passages that answer your questions. **Answers, topic tags, reading recommendations, and practice cards now run locally. No Groq, other cloud AI provider, or AI API key is used.** Google access still requires the internet.
+ClassMind connects to Google Classroom, organizes study materials, and answers questions with source references. **Source search and indexing run locally with MiniLM. Optional Gemini 3.5 Flash-Lite writes explanations, reading guidance, and practice answers from retrieved excerpts.** Groq is not used.
 
-The selected mode is **fast local evidence mode**: it uses MiniLM for retrieval and passage reranking, excludes syllabus topic lists, and presents complete source explanations with citations. Citations retain document pages, spreadsheet sheets, or video timestamps. It does not generate new explanations or solve unseen problems. Practice uses definition questions and fill-in-the-blank cards from explanatory material. Retrieval can still miss useful evidence; inspect the citations. Missing evidence returns:
+Two modes are supported: `gemini` for generated explanations and `local_evidence` for offline source excerpts. The example configuration defaults to local mode; this prepared checkout can enable Gemini through its private `.env`. Citations retain document pages, spreadsheet sheets, or video timestamps. Retrieval can miss useful evidence and generated answers can still be mistaken; inspect references. Missing evidence returns:
 
 > I couldn't find enough explanatory evidence in your imported sources to answer this question.
+
+## Gemini setup (1.4)
+
+Set these values in the ignored `.env` file, then restart both servers:
+
+```dotenv
+ANSWER_PROVIDER=gemini
+GEMINI_API_KEY=your_key_here
+GEMINI_MODEL=gemini-3.5-flash-lite
+GEMINI_TIMEOUT_SECONDS=20
+GEMINI_MAX_OUTPUT_TOKENS=1400
+```
+
+Do not put a real key in source code or `.env.example`. Gemini uses one bounded REST request per question with at most four retrieved excerpts of 3,500 characters each. It receives the question and bounded search context; full source files, filenames, Drive IDs, application user IDs, and Google login credentials are not included as prompt metadata. Excerpts themselves can contain private information. Google's free API tier can use submitted content to improve its products; see [Gemini pricing and data use](https://ai.google.dev/gemini-api/docs/pricing).
+
+The backend validates structured responses, source IDs, and supporting quotations. Invalid citations, incomplete responses, quota failures, and connectivity timeouts fall back to local evidence with an explicit notice. Citation checks establish that references exist; they do not independently prove every generated claim. If Gemini reports insufficient evidence, the app shows that result instead of inventing an answer. No automatic generation retries occur. Course overviews still use local Classroom metadata.
+
+Verify the configured key and model with `python scripts/check_gemini.py`. This makes one small live request using synthetic lesson text, validates its citations, and prints no credentials. Set `ANSWER_PROVIDER=local_evidence` and restart to keep all answering offline.
 
 ## Start this prepared checkout
 
@@ -48,9 +66,19 @@ Alternatively, `python scripts/restart_local.py` restarts only this checkout's d
 - Every dashboard poll included full import reports, including reports for historical jobs.
 - Re-sync downloaded, extracted, and embedded unchanged files again.
 
-The revised version removes remote AI calls, uses a roughly 23 MB quantized ONNX version of MiniLM, bounds inference batches and threads, starts one import at a time by default, reuses unchanged files and vectors, sends small dashboard summaries, and fetches detailed file reports on demand. Polling happens every ten seconds. Existing float32 MiniLM indexes remain usable with the quantized version of the same model; small score differences are expected, so similarity thresholds still require evaluation.
+The revised version removes remote AI calls from indexing, uses a roughly 23 MB quantized ONNX version of MiniLM, bounds inference batches and threads, starts one import at a time by default, reuses unchanged files and vectors, and sends small dashboard summaries. Gemini mode adds just one generation request after local retrieval. Idle pages do not poll. Only a small sidebar progress panel refreshes every five seconds while imports are queued or running. Existing float32 MiniLM indexes remain usable with the quantized version of the same model; small score differences are expected, so similarity thresholds still require evaluation.
 
 FastAPI remains Python. The measured dashboard handler was tens of milliseconds rather than the source of multi-second AI waits. Native ONNX inference and the native tokenizer handle the compute-heavy parts. Rewriting the polling handler in Rust would not remove remote-service waits, model loading, or exhausted RAM.
+
+## Faster page loading (1.3)
+
+On this Windows machine, an HTTP request to `localhost:8000` took about 2 seconds while the same request to `127.0.0.1:8000` took 6-25 ms. The frontend now resolves the internal HTTP backend address directly to IPv4 and reuses its connection. Browser and OAuth URLs remain `localhost` so existing session cookies continue to work.
+
+Each browser session has its own authenticated cache: course/profile/history reads expire after 30 seconds and source lists after 60 seconds. Mutations, import status transitions, sign-out, and explicit workspace refresh invalidate it. User sessions never share response caches. Page changes and filtering reuse data instead of repeating the same HTTP requests. Ordinary reads time out after 10 seconds, with a visible retry control; mutations are not retried automatically.
+
+Chat initially requests the latest 20 messages; load earlier messages in steps of 20, or explicitly prepare a full export. Source tables show 25 rows per page, and only the selected Library view renders. Background file watching is disabled for this prepared local checkout; restart the frontend after editing its code.
+
+Validation on the running backend measured course requests at 10-17 ms. Streamlit's test runner rendered the Courses screen in about 0.5 seconds, the source library in about 1.1 seconds, and cached reruns in 36-44 ms. These are server-side render measurements, not browser paint timings; available RAM and browser load still matter.
 
 ## Clean installation
 
@@ -65,9 +93,9 @@ py -3.11 -m venv .venv
 .\.venv\Scripts\python.exe scripts/prepare_models.py
 ```
 
-`requirements.txt` pins direct dependencies. `requirements-lock.txt` records resolved transitive versions. No PyTorch, sentence-transformers runtime, Groq SDK, or generative model is needed by the revised runtime. An existing virtual environment may still contain those old packages, but the application does not use them. Model weights still come from `sentence-transformers/all-MiniLM-L6-v2`.
+`requirements.txt` pins direct dependencies. `requirements-lock.txt` records resolved transitive versions. No PyTorch, sentence-transformers runtime, Groq SDK, or locally installed generative model is needed by the revised runtime. Gemini uses the existing Requests library through its REST API. An existing virtual environment may still contain those old packages, but the application does not use them. Model weights still come from `sentence-transformers/all-MiniLM-L6-v2`.
 
-`setup_env.py` creates `.env` only if it is absent, generating a Fernet encryption key without printing it. Keep that key stable; changing it makes stored Google credentials unreadable. The preparation script downloads the ONNX model/tokenizer plus extraction/tokenization resources only when missing. It pins the model revision and places assets under `data/`. Once prepared, course search and answers do not need internet access.
+`setup_env.py` creates `.env` only if it is absent, generating a Fernet encryption key without printing it. Keep that key stable; changing it makes stored Google credentials unreadable. The preparation script downloads the ONNX model/tokenizer plus extraction/tokenization resources only when missing. It pins the model revision and places assets under `data/`. Once prepared, course search and local-evidence answers do not need internet access. Gemini explanations still require an internet connection.
 
 ## Google Cloud setup
 
@@ -132,15 +160,15 @@ The Google OAuth flow uses offline refresh tokens, PKCE, expiring browser-bound 
 | `MAX_EXTRACTED_CHARS` | 2,000,000 per source; truncation is reported |
 | `YOUTUBE_LANGUAGES` | `en,hi`; fall back to another available caption language with a warning |
 
-An AI API key is not required or read. Application latency still depends on disk, CPU load, available RAM, course size, and Google download speed. The first question after backend startup includes loading the local model and course index; later questions reuse them.
+An AI API key is required only for Gemini mode. Latency depends on disk, CPU load, available RAM, course size, and provider response time. The first question after backend startup includes loading the local search model and index; later questions reuse them.
 
 ## Features and behavior
 
-**Overview:** searchable course cards, status filters, pagination, import progress, source counts, and on-demand reports. Use **Refresh Classroom** to check enrollments; **Re-sync sources** refreshes a selected course. The local-data deletion control is grouped separately.
+**Courses:** a compact, searchable course list with status filters and pagination. Open the study chat or source library from each row. Use **Course list options > Refresh Classroom** to check enrollments. Import controls and local-data management live in the selected course's Library.
 
-**Ask ClassMind:** a primary answer, supporting passages, expandable references, and local response timing. Course overview questions read actual Classroom metadata. Study tools offer readings and practice. Conversation history stays scoped to the selected course and exports as JSON. Simple follow-ups use the previous user question for search context; assistant messages are never evidence.
+**Study chat:** a primary answer, supporting passages, expandable references, and local response timing. Course overview questions read actual Classroom metadata. Study tools offer readings and practice. Conversation history stays scoped to the selected course and exports as JSON. Simple follow-ups use the previous user question for search context; assistant messages are never evidence.
 
-**Source Library:** filter by type or status, search titles and tags, inspect warnings, and open original sources. Add a public lesson URL with optional pasted text or a UTF-8 TXT/SRT/VTT transcript up to 1 MB. Added sources belong only to that user and course.
+**Source library:** filter by type or status, search titles and tags, inspect warnings, and open original sources. Add a public lesson URL with optional pasted text or a UTF-8 TXT/SRT/VTT transcript up to 1 MB. Added sources belong only to that user and course.
 
 Supported downloads: PDF, DOCX, PPTX, XLSX, EPUB, HTML, UTF-8 TXT/Markdown/CSV/JSON/caption text, and Google Docs/Slides/Sheets/Drawings exported as PDF. Available YouTube captions are imported with timestamps; public webpages and Classroom post descriptions are also indexed. Native YouTube attachments and video links embedded in posts are discovered automatically. Duplicate video URLs are combined. Raw video/audio, images, interactive forms, inaccessible files, and owner-disabled downloads are reported explicitly. Google limits native-file exports to 10 MB independently of the configured 200 MB download limit. [Drive export/download guide](https://developers.google.com/workspace/drive/api/guides/manage-downloads)
 
@@ -154,7 +182,7 @@ Each user/course has a distinct persistent Chroma collection. Queries also filte
 
 The model is the official [quantized MiniLM ONNX artifact](https://huggingface.co/sentence-transformers/all-MiniLM-L6-v2/tree/main/onnx). [Sentence Transformers' inference documentation](https://sbert.net/docs/sentence_transformer/usage/efficiency.html) describes ONNX acceleration and pooling considerations.
 
-Local answering retrieves matching parents, filters non-explanatory text, and reranks up to 48 candidate passages with MiniLM and query coverage. It displays at most three distinct explanations and preserves the exact supporting quotes. Definition questions favor definitions; limitation questions require limitation evidence. It can abstain on paraphrases with little shared terminology. It does not prove that every excerpt fully answers the question. No remote rewrite, answer-generation, or verification call occurs.
+In local_evidence mode, answering retrieves matching parents, filters non-explanatory text, and reranks up to 48 candidate passages with MiniLM and query coverage. It displays at most three distinct explanations and preserves the exact supporting quotes. Definition questions favor definitions; limitation questions require limitation evidence. It can abstain on paraphrases with little shared terminology. It does not prove that every excerpt fully answers the question. No remote rewrite, answer-generation, or verification call occurs.
 
 Each re-sync creates a staged collection. For unchanged files, the app rechecks Google access and `modifiedTime`, then copies cached extraction and existing vectors. Changed/new files are downloaded and embedded. Removed or newly inaccessible files are left out of the replacement collection. The manifest switches only after indexing succeeds. Listing/provider/index failures keep the previous published index. Per-file unsupported/extraction failures are reported in a completed partial import. Successful imports remove old local generations.
 
@@ -164,7 +192,7 @@ Tags use bounded local phrase-frequency extraction and occur in the source text.
 .\.venv\Scripts\python.exe scripts/refresh_local_tags.py
 ```
 
-The script uses a conditional database update so it cannot overwrite a concurrent re-sync. Historical import reports may still describe the previous implementation; the Materials Browser reads the current manifest.
+The script uses a conditional database update so it cannot overwrite a concurrent re-sync. Historical import reports may still describe the previous implementation; the Source library reads the current manifest.
 
 ## Validation
 
@@ -186,8 +214,8 @@ If pytest cannot access its default temporary directory, create `.test-runs` and
 
 | Symptom | Action |
 | --- | --- |
-| Old Groq error still appears | Restart the backend and frontend so the updated local code loads. `/health` should report version `1.2.0` and `answer_mode: local_evidence`. |
-| “Prepare the local AI once” | Run `scripts/prepare_models.py`; the first run needs access to Hugging Face. Subsequent answers are local. |
+| Old Groq error still appears | Restart the backend and frontend. `/health` should report version `1.4.0` and your configured `answer_mode` (`gemini` or `local_evidence`). |
+| “Prepare the local AI once” | Run `scripts/prepare_models.py`; the first run needs access to Hugging Face. Subsequent retrieval is local; explanations follow the configured answer provider. |
 | Slow computer despite local mode | Check available RAM and other applications. Keep one backend process and one import worker. Avoid importing all courses simultaneously. |
 | No courses | Confirm active student enrollment; click Refresh courses. |
 | Course has no searchable text | Click Import materials and inspect the file report. Scans need external OCR. |
@@ -212,11 +240,11 @@ For HTTPS hosting, use a shared hostname: Streamlit at `/`, backend exposed thro
 
 ## Layout and API
 
-`app.py` contains the three Streamlit pages. `backend/auth/` handles Google sign-in; `backend/classroom/` handles discovery/downloads; `backend/rag/` handles ingestion, ONNX embeddings, retrieval, and local evidence answers; `backend/storage.py` holds SQLite persistence. `data/raw`, `data/processed`, `data/chroma`, and `data/models` hold local assets. Setup, smoke testing, tag migration, and timing tools are in `scripts/`; automated tests are in `tests/`.
+`app.py` contains the three Streamlit pages. `backend/auth/` handles Google sign-in; `backend/classroom/` handles discovery/downloads; `backend/rag/` handles ingestion, ONNX embeddings, retrieval, Gemini explanations, and local evidence fallback; `backend/storage.py` holds SQLite persistence. `data/raw`, `data/processed`, `data/chroma`, and `data/models` hold local assets. Setup, smoke testing, tag migration, and timing tools are in `scripts/`; automated tests are in `tests/`.
 
 | Endpoint | Purpose |
 | --- | --- |
-| `GET /health` | Version and active local answer mode |
+| `GET /health` | Version, configured answer provider, model, and key-presence flag (never the key) |
 | `GET /auth/google/start`, `GET /auth/google/callback` | Browser OAuth |
 | `GET /me`, `POST /auth/logout` | Session profile/revocation |
 | `GET /courses`, `POST /courses/refresh` | Compact cached summaries / refresh Google enrollments |

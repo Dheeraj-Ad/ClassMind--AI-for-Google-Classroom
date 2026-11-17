@@ -32,3 +32,16 @@ def test_recent_history_is_bounded_and_chronological(seeded):
     messages = storage.recent_history("alice", "math", 6)
     assert len(messages) == 6
     assert messages[0]["content"] == "7" and messages[-1]["content"] == "9"
+
+
+def test_history_api_is_bounded_with_full_export_preserved(seeded):
+    from fastapi.testclient import TestClient
+    for i in range(15):
+        storage.append_exchange("alice", "math", str(i), {"content": str(i), "sources": []})
+    storage.append_exchange("bob", "math", "private", {"content": "private"})
+    headers = {"Authorization": "Bearer " + storage.create_session("alice")}
+    with TestClient(main.app) as client:
+        recent = client.get("/courses/math/history?limit=4", headers=headers).json()
+        assert len(recent) == 4 and recent[0]["content"] == "13"
+        assert len(client.get("/courses/math/history", headers=headers).json()) == 30
+        assert client.get("/courses/math/history?limit=10000", headers=headers).status_code == 422
